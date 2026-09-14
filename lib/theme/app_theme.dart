@@ -21,17 +21,6 @@ class AppTheme {
     'dropbox': Color(0xFF0061FF),
     'onedrive': Color(0xFF0078D4),
     'mega': Color(0xFFD40000),
-    'box': Color(0xFF0061D5),
-    'pcloud': Color(0xFF2ECC71),
-    'koofr': Color(0xFF00D1FF),
-    'azureblob': Color(0xFF0078D4),
-    'mediafire': Color(0xFF0073F7),
-    'putio': Color(0xFFFFCC00),
-    's3': Color(0xFFFF9900),
-    'ftp': Color(0xFF6366F1),
-    'sftp': Color(0xFF8B5CF6),
-    'webdav': Color(0xFF06B6D4),
-    'b2': Color(0xFFEF4444),
   };
 
   static ThemeData get darkTheme {

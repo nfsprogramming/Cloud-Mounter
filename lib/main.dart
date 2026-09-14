@@ -8,7 +8,9 @@ import 'package:tray_manager/tray_manager.dart';
 import 'screens/home_screen.dart';
 import 'screens/add_connection_screen.dart';
 import 'screens/settings_screen.dart';
+import 'services/connection_service.dart';
 import 'services/database_service.dart';
+import 'services/notification_service.dart';
 import 'services/rclone_service.dart';
 import 'theme/app_theme.dart';
 
@@ -30,6 +32,8 @@ void main() async {
   await windowManager.setSize(const Size(1100, 700));
   await windowManager.setTitle('CloudMounter');
   await windowManager.center();
+
+  await NotificationService.init();
 
   // Start rclone RCD (non-blocking — UI loads first)
   _startRclone();
@@ -61,6 +65,24 @@ class _CloudMounterAppState extends State<CloudMounterApp>
     trayManager.addListener(this);
     windowManager.addListener(this);
     _setupTray();
+    _initAutoMount();
+  }
+
+  Future<void> _initAutoMount() async {
+    await Future.delayed(const Duration(seconds: 2));
+    final settings = await DatabaseService.getAllSettings();
+    if (settings['auto_mount_on_launch'] == 'true') {
+      final connections = await ConnectionService.listConnections();
+      for (final conn in connections) {
+        if (conn.autoMount) {
+          try {
+            await ConnectionService.mount(conn);
+          } catch (e) {
+            debugPrint('Failed to auto-mount ${conn.name}: $e');
+          }
+        }
+      }
+    }
   }
 
   @override

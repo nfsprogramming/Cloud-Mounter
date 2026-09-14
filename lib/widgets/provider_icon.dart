@@ -36,28 +36,6 @@ class ProviderIcon extends StatelessWidget {
         return Icon(Icons.cloud, color: color, size: iconSize);
       case ConnectionType.mega:
         return _LetterIcon('M', color, iconSize, bold: true);
-      case ConnectionType.box:
-        return Icon(Icons.inventory_2_outlined, color: color, size: iconSize);
-      case ConnectionType.pcloud:
-        return Icon(Icons.cloud_circle, color: color, size: iconSize);
-      case ConnectionType.koofr:
-        return Icon(Icons.folder_shared, color: color, size: iconSize);
-      case ConnectionType.azureblob:
-        return Icon(Icons.data_object, color: color, size: iconSize);
-      case ConnectionType.mediafire:
-        return Icon(Icons.local_fire_department, color: color, size: iconSize);
-      case ConnectionType.putio:
-        return Icon(Icons.cloud_download, color: color, size: iconSize);
-      case ConnectionType.s3:
-        return Icon(Icons.storage, color: color, size: iconSize);
-      case ConnectionType.ftp:
-        return Icon(Icons.lan, color: color, size: iconSize);
-      case ConnectionType.sftp:
-        return Icon(Icons.terminal, color: color, size: iconSize);
-      case ConnectionType.webdav:
-        return Icon(Icons.cloud_sync, color: color, size: iconSize);
-      case ConnectionType.b2:
-        return _LetterIcon('B2', color, iconSize * 0.8);
     }
   }
 }

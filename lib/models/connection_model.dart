@@ -4,35 +4,13 @@ enum ConnectionType {
   gdrive,
   dropbox,
   onedrive,
-  mega,
-  box,
-  pcloud,
-  koofr,
-  azureblob,
-  mediafire,
-  putio,
-  s3,
-  ftp,
-  sftp,
-  webdav,
-  b2;
+  mega;
 
   String get displayName => switch (this) {
         gdrive => 'Google Drive',
         dropbox => 'Dropbox',
         onedrive => 'OneDrive',
         mega => 'Mega',
-        box => 'Box',
-        pcloud => 'pCloud',
-        koofr => 'Koofr',
-        azureblob => 'Azure Blob',
-        mediafire => 'MediaFire',
-        putio => 'Put.io',
-        s3 => 'Amazon S3',
-        ftp => 'FTP',
-        sftp => 'SFTP',
-        webdav => 'WebDAV',
-        b2 => 'Backblaze B2',
       };
 
   String get rcloneType => switch (this) {
@@ -40,20 +18,9 @@ enum ConnectionType {
         dropbox => 'dropbox',
         onedrive => 'onedrive',
         mega => 'mega',
-        box => 'box',
-        pcloud => 'pcloud',
-        koofr => 'koofr',
-        azureblob => 'azureblob',
-        mediafire => 'mediafire',
-        putio => 'putio',
-        s3 => 's3',
-        ftp => 'ftp',
-        sftp => 'sftp',
-        webdav => 'webdav',
-        b2 => 'b2',
       };
 
-  bool get isOAuth => [gdrive, dropbox, onedrive, box].contains(this);
+  bool get isOAuth => [gdrive, dropbox, onedrive].contains(this);
 }
 
 class ConnectionModel {
@@ -103,7 +70,7 @@ class ConnectionModel {
       name: map['name'] as String,
       type: ConnectionType.values.firstWhere(
         (e) => e.name == map['conn_type'],
-        orElse: () => ConnectionType.ftp,
+        orElse: () => ConnectionType.gdrive,
       ),
       config: decodedConfig,
       autoMount: (map['auto_mount'] as int? ?? 0) == 1,

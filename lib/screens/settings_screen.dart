@@ -136,9 +136,28 @@ class SettingsScreen extends ConsumerWidget {
                           label: 'Force Unmount All',
                           subtitle: 'Instantly clear all active rclone mounts',
                           onPressed: () async {
-                            await ConnectionService.unmountAll(
-                                ref.read(connectionsProvider).value ?? []);
-                            ref.read(connectionsProvider.notifier).refresh();
+                            try {
+                              await ConnectionService.unmountAll(
+                                  ref.read(connectionsProvider).value ?? []);
+                              ref.read(connectionsProvider.notifier).refresh();
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Successfully unmounted all drives'),
+                                    backgroundColor: AppTheme.success,
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Error unmounting: $e'),
+                                    backgroundColor: AppTheme.error,
+                                  ),
+                                );
+                              }
+                            }
                           },
                         ),
                       ],

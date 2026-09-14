@@ -219,6 +219,13 @@ class SettingsNotifier extends AsyncNotifier<Map<String, String>> {
     
     if (key == 'launch_at_startup') {
       await WindowsService.setLaunchAtStartup(value == 'true');
+    } else if (key == 'upload_limit_mbps' || key == 'download_limit_mbps') {
+      final settings = await DatabaseService.getAllSettings();
+      final up = int.tryParse(settings['upload_limit_mbps'] ?? '0') ?? 0;
+      final down = int.tryParse(settings['download_limit_mbps'] ?? '0') ?? 0;
+      await RcloneService.setBandwidthLimit(up, down);
+    } else if (key == 'proxy_enabled' || key == 'proxy_host' || key == 'proxy_port') {
+      await RcloneService.restart();
     }
     
     state = await AsyncValue.guard(DatabaseService.getAllSettings);

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/connection_model.dart';
@@ -112,14 +113,20 @@ class _AddConnectionScreenState extends ConsumerState<AddConnectionScreen> {
 
       if (_selectedType == ConnectionType.gdrive ||
           _selectedType == ConnectionType.dropbox ||
-          _selectedType == ConnectionType.onedrive ||
-          _selectedType == ConnectionType.box ||
-          _selectedType == ConnectionType.putio) {
+          _selectedType == ConnectionType.onedrive) {
         final sanitizedName = _nameCtrl.text.trim().replaceAll(RegExp(r'[^a-zA-Z0-9_\-\.\+@ ]'), '_');
-        final tokenStr = await RcloneService.startOAuthConfig(
+        final resultStr = await RcloneService.startOAuthConfig(
             sanitizedName, _selectedType!, config);
-        if (tokenStr != null && tokenStr.isNotEmpty) {
-          creds['token'] = tokenStr;
+        if (resultStr != null && resultStr.isNotEmpty) {
+          final result = jsonDecode(resultStr) as Map<String, dynamic>;
+          creds['token'] = result['token'];
+          if (result['drive_id'] != null) {
+            config['drive_id'] = result['drive_id'];
+          }
+          if (result['drive_type'] != null) {
+            config['drive_type'] = result['drive_type'];
+          }
+          debugPrint('[AddConnection] Extracted config from rclone dump: $config');
         } else {
           throw Exception('OAuth authentication failed or was cancelled.');
         }
@@ -151,38 +158,11 @@ class _AddConnectionScreenState extends ConsumerState<AddConnectionScreen> {
 
   Map<String, dynamic> _buildConfig() {
     return switch (_selectedType!) {
-      ConnectionType.s3 => {
-          'bucket': _field('bucket').text,
-          'region': _field('region').text,
-          'endpoint': _field('endpoint').text,
-        },
-      ConnectionType.ftp || ConnectionType.sftp => {
-          'host': _field('host').text,
-          'port': _field('port').text,
-          'username': _field('username').text,
-          'passive': _passiveMode.toString(),
-          if (_selectedType == ConnectionType.sftp && _field('key_file').text.isNotEmpty)
-            'key_file': _field('key_file').text,
-        },
-      ConnectionType.webdav => {
-          'url': _field('url').text,
-          'username': _field('username').text,
-        },
-      ConnectionType.b2 => {
-          'bucket': _field('bucket').text,
-        },
       ConnectionType.onedrive => {
           'drive_type': _onedriveType,
         },
-      ConnectionType.mega || ConnectionType.koofr => {
+      ConnectionType.mega => {
           'username': _field('username').text,
-        },
-      ConnectionType.pcloud => {
-          'username': _field('username').text,
-          'hostname': _field('hostname').text.isEmpty ? 'api.pcloud.com' : _field('hostname').text,
-        },
-      ConnectionType.azureblob => {
-          'account': _field('account').text,
         },
       _ => {},
     };
@@ -190,25 +170,8 @@ class _AddConnectionScreenState extends ConsumerState<AddConnectionScreen> {
 
   Map<String, dynamic> _buildCredentials() {
     return switch (_selectedType!) {
-      ConnectionType.s3 => {
-          'access_key_id': _field('access_key_id').text,
-          'secret_access_key': _field('secret_access_key').text,
-        },
-      ConnectionType.ftp || ConnectionType.sftp => {
+      ConnectionType.mega => {
           'password': _field('password').text,
-        },
-      ConnectionType.webdav => {
-          'password': _field('password').text,
-        },
-      ConnectionType.b2 => {
-          'application_key_id': _field('application_key_id').text,
-          'application_key': _field('application_key').text,
-        },
-      ConnectionType.mega || ConnectionType.koofr || ConnectionType.pcloud => {
-          'password': _field('password').text,
-        },
-      ConnectionType.azureblob => {
-          'key': _field('key').text,
         },
       _ => {},
     };
@@ -472,183 +435,7 @@ class _StepConfigure extends StatelessWidget {
           _buildField(context, field('password'), 'Password',
               obscure: true, required: true),
         ];
-      case ConnectionType.box:
-        return [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.card,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.open_in_browser,
-                    color: AppTheme.accent, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Box OAuth',
-                          style: Theme.of(context).textTheme.labelLarge),
-                      const SizedBox(height: 4),
-                      Text(
-                          'Authorization via Box.com will be required.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: AppTheme.textSecondary)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ];
-      case ConnectionType.pcloud:
-        return [
-          _buildField(context, field('username'), 'Email Address', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'Password',
-              obscure: true, required: true),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            value: field('hostname').text.isEmpty ? 'api.pcloud.com' : field('hostname').text,
-            decoration: const InputDecoration(labelText: 'Region'),
-            items: const [
-              DropdownMenuItem(value: 'api.pcloud.com', child: Text('Global')),
-              DropdownMenuItem(value: 'eapi.pcloud.com', child: Text('Europe')),
-            ],
-            onChanged: (v) => field('hostname').text = v!,
-          ),
-        ];
-      case ConnectionType.koofr:
-        return [
-          _buildField(context, field('username'), 'Email Address', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'App Password',
-              obscure: true, required: true),
-          const SizedBox(height: 8),
-          Text(
-            'Generate an "App Password" in your Koofr settings first.',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.warning),
-          ),
-        ];
-      case ConnectionType.azureblob:
-        return [
-          _buildField(context, field('account'), 'Account Name', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('key'), 'Account Key',
-              obscure: true, required: true),
-        ];
-      case ConnectionType.mediafire:
-        return [
-          _buildField(context, field('username'), 'Email Address', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'Password',
-              obscure: true, required: true),
-        ];
-      case ConnectionType.putio:
-        return [
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: AppTheme.card,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: AppTheme.border),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.open_in_browser,
-                    color: AppTheme.accent, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Put.io OAuth',
-                          style: Theme.of(context).textTheme.labelLarge),
-                      const SizedBox(height: 4),
-                      Text(
-                          'Authorization via Put.io will be required.',
-                          style: Theme.of(context)
-                              .textTheme
-                              .bodySmall
-                              ?.copyWith(color: AppTheme.textSecondary)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ];
-      case ConnectionType.s3:
-        return [
-          _buildField(context, field('access_key_id'), 'Access Key ID',
-              required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('secret_access_key'), 'Secret Access Key',
-              obscure: true, required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('bucket'), 'Bucket Name', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('region'), 'Region',
-              hint: 'us-east-1', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('endpoint'), 'Custom Endpoint (optional)',
-              hint: 'https://s3.compatible.host'),
-        ];
-      case ConnectionType.ftp:
-        return [
-          _buildField(context, field('host'), 'Host', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('port'), 'Port', hint: '21'),
-          const SizedBox(height: 12),
-          _buildField(context, field('username'), 'Username', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'Password',
-              obscure: true, required: true),
-          const SizedBox(height: 12),
-          _SwitchRow(
-              label: 'Passive Mode',
-              value: passiveMode,
-              onChanged: onPassiveToggle),
-        ];
-      case ConnectionType.sftp:
-        return [
-          _buildField(context, field('host'), 'Host', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('port'), 'Port', hint: '22'),
-          const SizedBox(height: 12),
-          _buildField(context, field('username'), 'Username', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'Password (or leave blank for key)',
-              obscure: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('key_file'), 'SSH Key File Path (optional)',
-              hint: '/home/user/.ssh/id_rsa'),
-        ];
-      case ConnectionType.webdav:
-        return [
-          _buildField(context, field('url'), 'WebDAV URL',
-              hint: 'https://example.com/webdav', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('username'), 'Username', required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('password'), 'Password',
-              obscure: true, required: true),
-        ];
-      case ConnectionType.b2:
-        return [
-          _buildField(context, field('application_key_id'), 'Application Key ID',
-              required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('application_key'), 'Application Key',
-              obscure: true, required: true),
-          const SizedBox(height: 12),
-          _buildField(context, field('bucket'), 'Bucket Name', required: true),
-        ];
+
     }
   }
 

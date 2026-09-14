@@ -35,7 +35,7 @@ class _EmptyPanel extends StatelessWidget {
             height: 100,
             decoration: BoxDecoration(
               color: AppTheme.card,
-              shape: BoxShape.circle,
+              borderRadius: BorderRadius.circular(24),
               border: Border.all(color: AppTheme.border, width: 2),
               boxShadow: [
                 BoxShadow(
@@ -45,7 +45,8 @@ class _EmptyPanel extends StatelessWidget {
                 ),
               ],
             ),
-            child: ClipOval(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(22),
               child: Image.asset(
                 'assets/icons/app_icon.png',
                 fit: BoxFit.cover,

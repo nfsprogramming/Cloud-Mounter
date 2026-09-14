@@ -10,6 +10,7 @@ import '../models/connection_model.dart';
 import '../models/activity_log_model.dart';
 import 'database_service.dart';
 import 'keychain_service.dart';
+import 'notification_service.dart';
 import 'rclone_service.dart';
 
 class ConnectionService {
@@ -234,6 +235,7 @@ class ConnectionService {
 
 
     if (!mounted) {
+      NotificationService.showMountEvent('Mount Failed', 'Failed to mount ${conn.name}', isError: true);
       throw Exception(
           'Mount failed after 30 seconds. Ensure WinFsp is installed on Windows, or FUSE on macOS/Linux.');
     }
@@ -252,6 +254,7 @@ class ConnectionService {
 
     await _logEvent(
         conn.id, conn.name, LogEventType.mount, 'Mounted at $mountPoint');
+    NotificationService.showMountEvent('Drive Mounted', '${conn.name} mounted at $mountPoint');
     return mountPoint;
   }
 
@@ -289,6 +292,7 @@ class ConnectionService {
 
     await _logEvent(
         conn.id, conn.name, LogEventType.unmount, 'Unmounted all points');
+    NotificationService.showMountEvent('Drive Unmounted', '${conn.name} was unmounted');
   }
 
   static Future<void> unmountAll(List<ConnectionModel> connections) async {
@@ -399,17 +403,29 @@ class ConnectionService {
     final sanitized = name.replaceAll(' ', '_').replaceAll('/', '_').replaceAll('\\', '_');
 
     if (Platform.isWindows) {
-      // Find next available drive letter E-Z
+      // Find next available drive letter E-Z using wmic to reliably detect WinFsp network drives
+      final Set<String> usedDrives = {};
+      try {
+        final result = await Process.run('wmic', ['logicaldisk', 'get', 'caption']);
+        if (result.exitCode == 0) {
+          final lines = result.stdout.toString().split('\n');
+          for (final line in lines) {
+            final trimmed = line.trim();
+            if (trimmed.length >= 2 && trimmed.endsWith(':')) {
+              usedDrives.add(trimmed.toUpperCase());
+            }
+          }
+        }
+      } catch (_) {}
+
       for (final letter in 'EFGHIJKLMNOPQRSTUVWXYZ'.split('')) {
         final drive = '$letter:';
-        try {
-          // On Windows, checking if 'G:\' exists is the reliable way to see if a drive letter is taken
-          if (!await Directory('$drive\\').exists()) {
-            return drive;
-          }
-        } catch (_) {
-          // If we can't access, it might be a broken mount or available
-          return drive;
+        if (!usedDrives.contains(drive)) {
+          try {
+            if (!await Directory('$drive\\').exists()) {
+              return drive;
+            }
+          } catch (_) {}
         }
       }
       return 'G:';

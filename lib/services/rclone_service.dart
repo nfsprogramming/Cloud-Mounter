@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/connection_model.dart';
 import '../utils/asset_extractor.dart';
+import 'database_service.dart';
 import 'keychain_service.dart';
 
 /// Manages the rclone process and RPC communication
@@ -26,16 +27,43 @@ class RcloneService {
     _rcloneBinaryPath = binaryPath;
     final configPath = await _resolveConfigPath();
 
+    final settings = await DatabaseService.getAllSettings();
+    final proxyEnabled = settings['proxy_enabled'] == 'true';
+    final proxyHost = settings['proxy_host'] ?? '';
+    final proxyPort = settings['proxy_port'] ?? '8080';
+    
+    final upLimit = settings['upload_limit_mbps'] ?? '0';
+    final downLimit = settings['download_limit_mbps'] ?? '0';
+    final bwlimitArgs = <String>[];
+    if (upLimit != '0' || downLimit != '0') {
+      final up = upLimit == '0' ? 'off' : '${upLimit}M';
+      final down = downLimit == '0' ? 'off' : '${downLimit}M';
+      bwlimitArgs.add('--bwlimit=$up:$down');
+    }
+
+    final env = <String, String>{};
+    if (proxyEnabled && proxyHost.isNotEmpty) {
+      env['HTTP_PROXY'] = 'http://$proxyHost:$proxyPort';
+      env['HTTPS_PROXY'] = 'http://$proxyHost:$proxyPort';
+    }
+
+    if (Platform.isWindows) {
+      try {
+        await Process.run('taskkill', ['/F', '/IM', 'rclone.exe']);
+      } catch (_) {}
+    }
+
     _process = await Process.start(binaryPath, [
       'rcd',
       '--rc-no-auth',
       '--rc-addr=127.0.0.1:$rpcPort',
       '--config=$configPath',
       '--log-level=INFO',
-    ]);
+      ...bwlimitArgs,
+    ], environment: env);
 
     _process!.stderr.transform(utf8.decoder).listen((data) {
-      // Log rclone stderr for debugging
+      debugPrint('[rclone stderr] $data');
     });
     _process!.stdout.transform(utf8.decoder).listen((data) {});
 
@@ -58,7 +86,7 @@ class RcloneService {
 
   static Future<bool> healthCheck() async {
     try {
-      await _rpc('/rc/noop', {});
+      await _rpc('/rc/noop', {}, skipReadyCheck: true);
       return true;
     } catch (_) {
       return false;
@@ -143,10 +171,7 @@ class RcloneService {
     if (Platform.isWindows) {
       // These keys correspond to rclone's internal Mount names (CamelCase)
       // used in the mountOpt object for the RPC API.
-      // Setting NetworkMode to false makes it appear as a local drive,
-      // which removes the annoying "(\\server)" suffix in Windows Explorer.
       mountOptions['VolumeName'] = conn.name;
-      mountOptions['NetworkMode'] = false;
     }
 
     // VFS performance and reliability tweaks.
@@ -251,7 +276,6 @@ class RcloneService {
 
     // STEP 1: Get the OAuth token using 'rclone authorize'
     // This opens the browser and waits for the user to authorize.
-    // It outputs the final JSON token to stdout.
     final authArgs = [
       'authorize', type.rcloneType,
       '--config=$configPath',
@@ -261,52 +285,87 @@ class RcloneService {
     final stdoutBuffer = StringBuffer();
     final stderrBuffer = StringBuffer();
 
-    process.stdout.transform(utf8.decoder).listen((data) => stdoutBuffer.write(data));
-    process.stderr.transform(utf8.decoder).listen((data) => stderrBuffer.write(data));
+    final completer = Completer<String>();
 
-    // Wait for the authorize process to finish (user completes browser flow)
-    final exitCode = await process.exitCode.timeout(
-      const Duration(minutes: 5),
-      onTimeout: () {
-        process.kill();
-        throw TimeoutException('Authentication timed out after 5 minutes');
-      },
-    );
+    process.stdout.transform(utf8.decoder).listen((data) {
+      stdoutBuffer.write(data);
+      // Try to extract token dynamically
+      final matches = RegExp(r'(\{.*?\})', dotAll: true).allMatches(stdoutBuffer.toString());
+      if (matches.isNotEmpty) {
+        try {
+          final tokenStr = matches.last.group(1)!;
+          // Validate it's actually JSON
+          jsonDecode(tokenStr);
+          if (!completer.isCompleted) {
+            completer.complete(tokenStr);
+          }
+        } catch (_) {
+          // Not valid JSON yet, keep buffering
+        }
+      }
+    });
 
-    if (exitCode != 0) {
-      throw Exception('Authentication failed: ${stderrBuffer.toString()}');
+    process.stderr.transform(utf8.decoder).listen((data) {
+      stderrBuffer.write(data);
+    });
+
+    try {
+      final tokenJson = await completer.future.timeout(const Duration(minutes: 5));
+      process.kill();
+      
+      // Step 3: Create the config non-interactively using the token
+      // For OneDrive, we also pre-set stable defaults to avoid any further prompts.
+      final createArgs = [
+        'config', 'create', remoteName, type.rcloneType,
+        '--config=$configPath',
+        '--non-interactive',
+        'token=$tokenJson',
+        if (type == ConnectionType.onedrive) ...[
+          'drive_type=${params['drive_type'] ?? 'personal'}',
+          'no_versions=true',
+          'chunk_size=10M',
+        ],
+        ...params.entries.where((e) => e.key != 'drive_type').map((e) => '${e.key}=${e.value}'),
+      ];
+
+      final createResult = await Process.run(binary, createArgs);
+      if (createResult.exitCode != 0) {
+        throw Exception('Failed to create config: ${createResult.stderr}');
+      }
+
+      String? discoveredDriveId;
+      if (type == ConnectionType.onedrive) {
+        final backendResult = await Process.run(binary, ['backend', 'drives', '$remoteName:', '--config=$configPath']);
+        if (backendResult.exitCode == 0) {
+          try {
+            final drives = jsonDecode(backendResult.stdout) as List;
+            if (drives.isNotEmpty) {
+              discoveredDriveId = drives.first['id'];
+            }
+          } catch (_) {}
+        }
+      }
+
+      final dumpResult = await Process.run(binary, ['config', 'dump', '--config=$configPath']);
+      if (dumpResult.exitCode == 0) {
+        try {
+          final allConfigs = jsonDecode(dumpResult.stdout);
+          final thisConfig = allConfigs[remoteName];
+          if (thisConfig != null) {
+            return jsonEncode({
+              'token': thisConfig['token'] ?? tokenJson,
+              'drive_id': discoveredDriveId ?? thisConfig['drive_id'],
+              'drive_type': thisConfig['drive_type'],
+            });
+          }
+        } catch (_) {}
+      }
+
+      return jsonEncode({'token': tokenJson});
+    } catch (e) {
+      process.kill();
+      throw Exception('Authentication failed: $e\n${stderrBuffer.toString()}');
     }
-
-    // Step 2: Parse the token JSON from stdout
-    final tokenOutput = stdoutBuffer.toString();
-    final tokenMatch = RegExp(r'(\{.*?\})', dotAll: true).lastMatch(tokenOutput);
-    if (tokenMatch == null) {
-      throw Exception('Could not find token in rclone output.');
-    }
-    final tokenJson = tokenMatch.group(1)!;
-
-    // Step 3: Create the config non-interactively using the token
-    // For OneDrive, we also pre-set stable defaults to avoid any further prompts.
-    final createArgs = [
-      'config', 'create', remoteName, type.rcloneType,
-      '--config=$configPath',
-      '--non-interactive',
-      'token=$tokenJson',
-      if (type == ConnectionType.onedrive) ...[
-        'drive_type=${params['drive_type'] ?? 'personal'}',
-        'no_versions=true',
-        'chunk_size=10M',
-      ],
-      ...params.entries.where((e) => e.key != 'drive_type').map((e) => '${e.key}=${e.value}'),
-    ];
-
-    final createResult = await Process.run(binary, createArgs);
-    if (createResult.exitCode != 0) {
-      throw Exception('Failed to create config: ${createResult.stderr}');
-    }
-
-    return tokenJson;
-
   }
 
   // ─── List remote top-level folders ───────────────────────────────────
@@ -336,17 +395,21 @@ class RcloneService {
   // ─── Private helpers ──────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> _rpc(
-      String endpoint, Map<String, dynamic> body) async {
+      String endpoint, Map<String, dynamic> body, {bool skipReadyCheck = false}) async {
+    if (!skipReadyCheck) {
+      await _waitForReady();
+    }
     final client = HttpClient();
     try {
-      final request =
-          await client.postUrl(Uri.parse('$rpcBase$endpoint'));
+      final request = await client
+          .postUrl(Uri.parse('$rpcBase$endpoint'))
+          .timeout(const Duration(seconds: 15));
       request.headers.set('Content-Type', 'application/json');
       final payload = utf8.encode(jsonEncode(body));
       request.headers.contentLength = payload.length;
       request.add(payload);
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
+      final response = await request.close().timeout(const Duration(seconds: 15));
+      final responseBody = await response.transform(utf8.decoder).join().timeout(const Duration(seconds: 15));
       // Check content type before JSON decode
       Map<String, dynamic> data;
       try {
@@ -419,86 +482,7 @@ class RcloneService {
           'user': conn.config['username'] ?? '',
           'pass': creds['password'] ?? '',
         };
-      case ConnectionType.box:
-        return {
-          ...base,
-          'token': creds['token'] ?? '',
-        };
-      case ConnectionType.pcloud:
-        return {
-          ...base,
-          'username': conn.config['username'] ?? '',
-          'pass': creds['password'] ?? '',
-          'hostname': conn.config['hostname'] ?? 'api.pcloud.com',
-        };
-      case ConnectionType.koofr:
-        return {
-          ...base,
-          'user': conn.config['username'] ?? '',
-          'pass': creds['password'] ?? '',
-          'provider': 'koofr',
-        };
-      case ConnectionType.azureblob:
-        return {
-          ...base,
-          'account': conn.config['account'] ?? '',
-          'key': creds['key'] ?? '',
-        };
-      case ConnectionType.mediafire:
-        return {
-          ...base,
-          'user': conn.config['username'] ?? '',
-          'pass': creds['password'] ?? '',
-        };
-      case ConnectionType.putio:
-        return {
-          ...base,
-          'token': creds['token'] ?? '',
-        };
-      case ConnectionType.s3:
-        return {
-          ...base,
-          'provider': 'AWS',
-          'access_key_id': creds['access_key_id'] ?? '',
-          'secret_access_key': creds['secret_access_key'] ?? '',
-          'region': conn.config['region'] ?? '',
-          'bucket': conn.config['bucket'] ?? '',
-          if ((conn.config['endpoint'] as String?)?.isNotEmpty == true)
-            'endpoint': conn.config['endpoint'],
-        };
-      case ConnectionType.ftp:
-        return {
-          ...base,
-          'host': conn.config['host'] ?? '',
-          'port': _validatePort(conn.config['port']?.toString()) ?? '21',
-          'user': conn.config['username'] ?? '',
-          'pass': creds['password'] ?? '',
-          'passive': conn.config['passive'] ?? 'true',
-        };
-      case ConnectionType.sftp:
-        return {
-          ...base,
-          'host': conn.config['host'] ?? '',
-          'port': _validatePort(conn.config['port']?.toString()) ?? '22',
-          'user': conn.config['username'] ?? '',
-          if (creds['password'] != null) 'pass': creds['password'],
-          if (conn.config['key_file'] != null) 'key_file': conn.config['key_file'],
-        };
-      case ConnectionType.webdav:
-        return {
-          ...base,
-          'url': conn.config['url'] ?? '',
-          'user': conn.config['username'] ?? '',
-          'pass': creds['password'] ?? '',
-          'vendor': 'other',
-        };
-      case ConnectionType.b2:
-        return {
-          ...base,
-          'account': creds['application_key_id'] ?? '',
-          'key': creds['application_key'] ?? '',
-          'bucket': conn.config['bucket'] ?? '',
-        };
+
     }
   }
 }

@@ -82,6 +82,15 @@ class ConnectionsNotifier extends AsyncNotifier<List<ConnectionModel>> {
     await refresh();
   }
 
+  Future<void> mountAll() async {
+    final connections = state.value ?? [];
+    for (final c in connections) {
+      if (!c.isMounted && c.mountError == null) {
+        await mountConnection(c.id);
+      }
+    }
+  }
+
   void _updateMountState(
     String id, {
     bool? isMounting,

@@ -103,6 +103,19 @@ class _TitleBar extends ConsumerWidget {
 
           const SizedBox(width: 12),
 
+          if (connections.isNotEmpty && mountedCount < connections.length)
+            TextButton.icon(
+              onPressed: () => ref.read(connectionsProvider.notifier).mountAll(),
+              icon: const Icon(Icons.cloud_upload_outlined, size: 16),
+              label: const Text('Mount All'),
+              style: TextButton.styleFrom(
+                foregroundColor: AppTheme.textSecondary,
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+              ),
+            ),
+
+          const SizedBox(width: 8),
+
           // Settings icon
           IconButton(
             onPressed: () =>

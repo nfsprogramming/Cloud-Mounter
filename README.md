@@ -9,6 +9,10 @@ Cloud Mounter is a cross-platform desktop application built with Flutter that pr
 * **Cross-Platform**: Built with Flutter, supporting Windows, macOS, and Linux desktop environments.
 * **Activity Logging**: Monitor the status of your mounts and active connections directly from the application dashboard.
 
+## Download
+
+You can download the latest Windows installer from the [Releases](https://github.com/nfsprogramming/Cloud-Mounter/releases) page.
+
 ## Getting Started
 
 ### Prerequisites

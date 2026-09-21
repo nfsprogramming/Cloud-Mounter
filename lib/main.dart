@@ -31,7 +31,11 @@ void main() async {
   await windowManager.setMinimumSize(const Size(900, 600));
   await windowManager.setSize(const Size(1100, 700));
   await windowManager.setTitle('CloudMounter');
+  if (Platform.isWindows) {
+    await windowManager.setIcon('assets/icons/app_icon.ico');
+  }
   await windowManager.center();
+  await windowManager.setPreventClose(true);
 
   await NotificationService.init();
 
@@ -105,7 +109,7 @@ class _CloudMounterAppState extends State<CloudMounterApp>
       items: [
         MenuItem(key: 'show', label: 'Open CloudMounter'),
         MenuItem.separator(),
-        MenuItem(key: 'quit', label: 'Quit'),
+        MenuItem(key: 'exit', label: 'Exit'),
       ],
     );
     await trayManager.setContextMenu(menu);
@@ -117,9 +121,14 @@ class _CloudMounterAppState extends State<CloudMounterApp>
   }
 
   @override
+  void onTrayIconRightMouseDown() {
+    trayManager.popUpContextMenu();
+  }
+
+  @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     if (menuItem.key == 'show') windowManager.show();
-    if (menuItem.key == 'quit') _quit();
+    if (menuItem.key == 'exit') _quit();
   }
 
   @override
